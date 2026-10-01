@@ -1,0 +1,43 @@
+name: Publish enrichment snapshots
+
+on:
+  schedule:
+    # 11:17 UTC. Avoid the top of the hour, when GitHub drops or delays schedules.
+    - cron: '17 11 * * *'
+  workflow_dispatch:
+
+# Snapshot commits do not use a push trigger, so a publish cannot start another run.
+# GitHub may still delay this schedule or drop it under load. A missed run leaves
+# the last manifest in place. The next successful run publishes a new generation.
+permissions: {}
+
+concurrency:
+  group: enrichment-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the data repository
+        uses: actions/checkout@v4
+      - name: Use the standard Node 22 runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test the publisher
+        run: node --test publisher/decide.test.mjs
+      - name: Fetch sources and write one generation
+        run: node publisher/publish.mjs
+      - name: Commit the manifest and payloads together
+        run: |
+          git add data
+          if git diff --cached --quiet; then
+            echo "No snapshot change."
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Publish enrichment snapshot"
+          git push
